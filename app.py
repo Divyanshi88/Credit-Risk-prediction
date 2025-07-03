@@ -201,6 +201,178 @@ elif page == "📊 Model Visualization":
         elif hasattr(model, 'max_depth'):
             st.info(f"**Max Depth:** {model.max_depth}")
     
+    # Feature Importance
+    if hasattr(model, 'feature_importances_'):
+        st.header("🎯 Feature Importance")
+        features = ['Employed', 'Bank Balance', 'Annual Salary']
+        importances = model.feature_importances_
+        
+        fig_importance = px.bar(
+            x=features,
+            y=importances,
+            title="Feature Importance",
+            labels={'x': 'Features', 'y': 'Importance'},
+            color=importances,
+            color_continuous_scale='viridis'
+        )
+        st.plotly_chart(fig_importance, use_container_width=True)
+    
+    # Probability Distribution Analysis
+    st.header("📈 Probability Distribution Analysis")
+    
+    # Generate synthetic data
+    np.random.seed(42)
+    n_samples = 1000
+    synthetic_data = pd.DataFrame({
+        'Employed': np.random.choice([0, 1], n_samples, p=[0.2, 0.8]),
+        'Bank Balance': np.random.normal(8000, 5000, n_samples).clip(0, None),
+        'Annual Salary': np.random.normal(50000, 20000, n_samples).clip(0, None)
+    })
+
+    synthetic_data.columns = synthetic_data.columns.str.strip()
+    synthetic_probs = model.predict_proba(synthetic_data)[:, 1]
+    synthetic_data['Probability'] = synthetic_probs
+    
+    st.subheader("🔍 Debug: Synthetic Data Sample")
+    st.write(synthetic_data.head())
+    st.write("Synthetic Data Shape:", synthetic_data.shape)
+
+    if not synthetic_data.empty and 'Probability' in synthetic_data.columns:
+        fig_dist = px.histogram(
+            synthetic_data,
+            x='Probability',
+            nbins=50,
+            title='Distribution of Approval Probabilities',
+            labels={'Probability': 'Approval Probability', 'count': 'Frequency'}
+        )
+        fig_dist.update_layout(xaxis_range=[0, 1])
+        st.plotly_chart(fig_dist, use_container_width=True)
+    else:
+        st.warning("No probability data available to plot.")
+
+    # Feature Impact
+    st.header("🔍 Feature Impact Analysis")
+    feature_to_analyze = st.selectbox("Select feature to analyze:", ['Bank Balance', 'Annual Salary', 'Employed'])
+
+    if feature_to_analyze in ['Bank Balance', 'Annual Salary']:
+        fig_scatter = px.scatter(
+            synthetic_data,
+            x=feature_to_analyze,
+            y='Probability',
+            color='Employed',
+            title=f'{feature_to_analyze} vs Approval Probability',
+            labels={'Probability': 'Approval Probability'},
+            opacity=0.6
+        )
+        st.plotly_chart(fig_scatter, use_container_width=True)
+    else:
+        fig_box = px.box(
+            synthetic_data,
+            x='Employed',
+            y='Probability',
+            title='Employment Status vs Approval Probability'
+        )
+        st.plotly_chart(fig_box, use_container_width=True)
+
+    # Threshold Analysis
+    st.header("⚖️ Threshold Analysis")
+    
+    thresholds = np.linspace(0.1, 0.9, 50)
+    metrics = []
+    
+    for thresh in thresholds:
+        predictions = (synthetic_probs > thresh).astype(int)
+        true_labels = (synthetic_probs > 0.5).astype(int)  # Synthetic labels
+
+        accuracy = np.mean(predictions == true_labels)
+        precision = np.sum((predictions == 1) & (true_labels == 1)) / max(np.sum(predictions == 1), 1)
+        recall = np.sum((predictions == 1) & (true_labels == 1)) / max(np.sum(true_labels == 1), 1)
+
+        metrics.append({
+            'Threshold': thresh,
+            'Accuracy': accuracy,
+            'Precision': precision,
+            'Recall': recall
+        })
+
+    metrics_df = pd.DataFrame(metrics)
+    metrics_df.columns = metrics_df.columns.str.strip()
+
+    st.subheader("🔍 Debug: Threshold Metrics Sample")
+    st.write(metrics_df.head())
+    st.write("Metrics Data Shape:", metrics_df.shape)
+
+    if not metrics_df.empty and {'Threshold', 'Accuracy', 'Precision', 'Recall'}.issubset(metrics_df.columns):
+        fig_metrics = px.line(
+            metrics_df,
+            x='Threshold',
+            y=['Accuracy', 'Precision', 'Recall'],
+            title='Model Performance vs Threshold',
+            labels={'value': 'Score', 'variable': 'Metric'}
+        )
+        fig_metrics.update_layout(xaxis_range=[0, 1], yaxis_range=[0, 1])
+        st.plotly_chart(fig_metrics, use_container_width=True)
+    else:
+        st.warning("No valid metrics data to plot.")
+
+    # Optional: Interactive Prediction Surface
+    st.header("🌐 Interactive Prediction Surface")
+    
+    if st.checkbox("Show 2D Prediction Surface"):
+        employed_val = st.radio("Employment Status:", [0, 1], index=1)
+        balance_range = np.linspace(0, 20000, 50)
+        salary_range = np.linspace(0, 100000, 50)
+        B, S = np.meshgrid(balance_range, salary_range)
+
+        grid_data = pd.DataFrame({
+            'Employed': employed_val,
+            'Bank Balance': B.ravel(),
+            'Annual Salary': S.ravel()
+        })
+
+        grid_probs = model.predict_proba(grid_data)[:, 1].reshape(B.shape)
+
+        fig_surface = go.Figure(data=[go.Surface(
+            z=grid_probs,
+            x=balance_range,
+            y=salary_range,
+            colorscale='viridis',
+            name='Approval Probability'
+        )])
+
+        fig_surface.update_layout(
+            title=f'Prediction Surface (Employed: {employed_val})',
+            scene=dict(
+                xaxis_title='Bank Balance ($)',
+                yaxis_title='Annual Salary ($)',
+                zaxis_title='Approval Probability'
+            )
+        )
+
+        st.plotly_chart(fig_surface, use_container_width=True)
+
+    st.title("📊 Model Visualization & Analysis")
+    st.markdown("Explore the credit risk model's behavior and performance metrics.")
+    
+    # Model Information
+    st.header("🤖 Model Information")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.info(f"**Model Type:** {type(model).__name__}")
+        if hasattr(model, 'feature_names_in_'):
+            st.info(f"**Features:** {', '.join(model.feature_names_in_)}")
+        if hasattr(model, 'n_features_in_'):
+            st.info(f"**Number of Features:** {model.n_features_in_}")
+    
+    with col2:
+        if hasattr(model, 'classes_'):
+            st.info(f"**Classes:** {model.classes_}")
+        if hasattr(model, 'n_estimators'):
+            st.info(f"**Number of Estimators:** {model.n_estimators}")
+        elif hasattr(model, 'max_depth'):
+            st.info(f"**Max Depth:** {model.max_depth}")
+    
     # Feature Importance (if available)
     if hasattr(model, 'feature_importances_'):
         st.header("🎯 Feature Importance")
