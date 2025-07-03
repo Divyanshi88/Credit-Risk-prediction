@@ -4,6 +4,5 @@ shap
 matplotlib
 seaborn
 numpy
-scikit-learn
 plotly
 scikit-learn==1.2.2
