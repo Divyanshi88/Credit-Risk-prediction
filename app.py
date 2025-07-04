@@ -5,8 +5,15 @@ st.set_page_config(
     page_icon="💳"
 )
 
+import joblib
 import pandas as pd
+import shap
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
+import seaborn as sns
 import numpy as np
+from sklearn.metrics import classification_report, confusion_matrix
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -14,89 +21,43 @@ import plotly.io as pio
 
 # Configure plotly for better rendering
 pio.templates.default = "plotly_white"
-
-# Try to import optional libraries with error handling
+# For deployment, use 'iframe' or 'streamlit' instead of 'browser'
 try:
-    import joblib
-    JOBLIB_AVAILABLE = True
-except ImportError:
-    JOBLIB_AVAILABLE = False
-    st.warning("joblib not available - using mock model")
+    pio.renderers.default = "streamlit"
+except:
+    pio.renderers.default = "iframe"
 
-try:
-    import shap
-    SHAP_AVAILABLE = True
-except ImportError:
-    SHAP_AVAILABLE = False
-    st.warning("SHAP not available - explanations disabled")
-
-try:
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    import matplotlib
-    matplotlib.use('Agg')
-    plt.style.use('default')
-    sns.set_style("whitegrid")
-    MATPLOTLIB_AVAILABLE = True
-except ImportError:
-    MATPLOTLIB_AVAILABLE = False
-    st.warning("Matplotlib/Seaborn not available")
+# Set matplotlib and seaborn style
+plt.style.use('default')
+sns.set_style("whitegrid")
 
 # Configure pandas options
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', None)
 pd.set_option('display.max_colwidth', None)
 
-# --- Mock Model Class for Demo ---
-class MockModel:
-    def __init__(self):
-        self.feature_names_in_ = ['Employed', 'Bank Balance', 'Annual Salary']
-        self.n_features_in_ = 3
-        self.classes_ = [0, 1]
-        self.feature_importances_ = [0.3, 0.4, 0.3]
-        self.n_estimators = 100
-    
-    def predict_proba(self, X):
-        """Mock prediction based on simple rules"""
-        if isinstance(X, pd.DataFrame):
-            employed = X['Employed'].values
-            balance = X['Bank Balance'].values
-            salary = X['Annual Salary'].values
-        else:
-            employed = X[:, 0]
-            balance = X[:, 1]
-            salary = X[:, 2]
-        
-        # Simple scoring logic
-        score = (employed * 0.3 + 
-                np.clip(balance / 50000, 0, 1) * 0.4 + 
-                np.clip(salary / 100000, 0, 1) * 0.3)
-        
-        # Convert to probability
-        prob_approve = 1 / (1 + np.exp(-5 * (score - 0.5)))
-        prob_deny = 1 - prob_approve
-        
-        return np.column_stack([prob_deny, prob_approve])
-
 # --- Load Model ---
 @st.cache_resource
 def load_model():
-    if JOBLIB_AVAILABLE:
-        try:
-            model = joblib.load("models/credit_risk_model_v2.pkl")
-            return model
-        except FileNotFoundError:
-            st.warning("⚠️ Model file not found. Using mock model for demo.")
-            return MockModel()
-        except Exception as e:
-            st.warning(f"⚠️ Error loading model: {str(e)}. Using mock model.")
-            return MockModel()
-    else:
-        st.info("ℹ️ Using mock model for demonstration")
-        return MockModel()
+    try:
+        model = joblib.load("models/credit_risk_model_v2.pkl")
+        return model
+    except FileNotFoundError:
+        st.error("❌ Model file not found. Please ensure 'credit_risk_model_v2.pkl' exists in the 'models' directory.")
+        st.stop()
+    except Exception as e:
+        st.error(f"❌ Error loading model: {str(e)}")
+        st.stop()
 
-# Load the model
-model = load_model()
+# Load the model with error handling
+try:
+    model = load_model()
+    if model is None:
+        st.error("❌ Failed to load the credit risk model.")
+        st.stop()
+except Exception as e:
+    st.error(f"❌ Critical error loading model: {str(e)}")
+    st.stop()
 
 # --- Navigation ---
 st.sidebar.title("🧭 Navigation")
@@ -111,8 +72,13 @@ page = st.sidebar.selectbox(
 if page == "🏠 Home - Credit Risk Predictor":
     st.title("💳 Credit Risk Prediction System")
     
-    # Display company info instead of loading image
-    st.info("🏢 **Harvestly Credit Solutions** - AI-Powered Risk Assessment")
+    # Load image with error handling
+    try:
+        st.image("./images/Harvestly.png", width=250)
+    except FileNotFoundError:
+        st.info("ℹ️ Company logo not found. This doesn't affect the functionality.")
+    except Exception as e:
+        st.info(f"ℹ️ Could not load logo: {str(e)}")
     
     st.markdown("Predict whether a **loan will be approved** based on applicant financial information. Adjust the threshold to control sensitivity.")
     
@@ -122,7 +88,7 @@ if page == "🏠 Home - Credit Risk Predictor":
     employment_status = st.sidebar.selectbox("Are you employed?", ["Yes", "No"])
     bank_balance_raw = st.sidebar.text_input("Bank Balance ($)", "5000")
     annual_salary_raw = st.sidebar.text_input("Annual Salary ($)", "45000")
-    threshold = st.sidebar.slider("⚖️ Classification Threshold", 0.0, 1.0, 0.5, 0.01)
+    threshold = st.sidebar.slider("⚖️ Classification Threshold", 0.0, 1.0, 0.3, 0.01)
     
     # --- Clean and Convert Input ---
     def clean_number(value):
@@ -146,8 +112,8 @@ if page == "🏠 Home - Credit Risk Predictor":
     st.sidebar.markdown("---")
     st.sidebar.subheader("🔍 Debug Info")
     st.sidebar.write(f"**Employed:** {employed}")
-    st.sidebar.write(f"**Bank Balance:** ${bank_balance:,.2f}")
-    st.sidebar.write(f"**Annual Salary:** ${annual_salary:,.2f}")
+    st.sidebar.write(f"**Bank Balance:** {bank_balance}")
+    st.sidebar.write(f"**Annual Salary:** {annual_salary}")
     
     # --- Prediction ---
     if st.sidebar.button("🔮 Predict"):
@@ -165,15 +131,13 @@ if page == "🏠 Home - Credit Risk Predictor":
             result = "✅ Loan Approved" if prediction == 1 else "❌ Loan Denied"
             
             # Display results in main area
-            st.header("📊 Prediction Results")
-            
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                st.metric("Approval Probability", f"{proba:.1%}")
+                st.metric("Approval Probability", f"{proba:.4f}")
             
             with col2:
-                st.metric("Threshold", f"{threshold:.1%}")
+                st.metric("Threshold", f"{threshold}")
             
             with col3:
                 if prediction:
@@ -183,53 +147,40 @@ if page == "🏠 Home - Credit Risk Predictor":
             
             # Probability gauge
             fig_gauge = go.Figure(go.Indicator(
-                mode = "gauge+number",
+                mode = "gauge+number+delta",
                 value = proba,
                 domain = {'x': [0, 1], 'y': [0, 1]},
                 title = {'text': "Approval Probability"},
-                gauge = {
-                    'axis': {'range': [None, 1]},
-                    'bar': {'color': "darkgreen" if prediction else "darkred"},
-                    'steps': [
-                        {'range': [0, threshold], 'color': "lightgray"},
-                        {'range': [threshold, 1], 'color': "lightgreen"}
-                    ],
-                    'threshold': {
-                        'line': {'color': "red", 'width': 4},
-                        'thickness': 0.75, 
-                        'value': threshold
-                    }
-                }
-            ))
+                delta = {'reference': threshold},
+                gauge = {'axis': {'range': [None, 1]},
+                        'bar': {'color': "darkgreen" if prediction else "darkred"},
+                        'steps' : [
+                            {'range': [0, threshold], 'color': "lightgray"},
+                            {'range': [threshold, 1], 'color': "lightgreen"}],
+                        'threshold' : {'line': {'color': "red", 'width': 4},
+                                      'thickness': 0.75, 'value': threshold}}))
             
-            fig_gauge.update_layout(height=400)
             st.plotly_chart(fig_gauge, use_container_width=True)
             
-            # Simple explanation without SHAP
-            st.subheader("📈 Decision Factors")
-            
-            factors = []
-            if employed:
-                factors.append("✅ Employment status: Positive impact")
-            else:
-                factors.append("❌ Employment status: Negative impact")
-            
-            if bank_balance > 10000:
-                factors.append("✅ Bank balance: Strong positive impact")
-            elif bank_balance > 5000:
-                factors.append("🔶 Bank balance: Moderate positive impact")
-            else:
-                factors.append("❌ Bank balance: Negative impact")
-            
-            if annual_salary > 60000:
-                factors.append("✅ Annual salary: Strong positive impact")
-            elif annual_salary > 40000:
-                factors.append("🔶 Annual salary: Moderate positive impact")
-            else:
-                factors.append("❌ Annual salary: Negative impact")
-            
-            for factor in factors:
-                st.write(factor)
+            # SHAP Explainability
+            try:
+                st.subheader("📈 Explanation with SHAP")
+                explainer = shap.Explainer(model)
+                shap_values = explainer(sample_input)
+                
+                # Clear any existing plots
+                plt.clf()
+                plt.figure(figsize=(10, 6))
+                
+                st.set_option('deprecation.showPyplotGlobalUse', False)
+                shap.plots.waterfall(shap_values[0], show=False)
+                
+                # Ensure the plot is displayed
+                fig = plt.gcf()
+                st.pyplot(fig, bbox_inches="tight", clear_figure=True)
+                plt.close(fig)
+            except Exception as e:
+                st.warning("SHAP explanation not available. Error: " + str(e))
                 
         except Exception as e:
             st.error(f"Prediction error: {str(e)}")
@@ -238,16 +189,6 @@ if page == "🏠 Home - Credit Risk Predictor":
     st.markdown("---")
     st.subheader("📁 Upload CSV for Bulk Predictions")
     st.markdown("Your CSV must contain the columns: `Employed`, `Bank Balance`, and `Annual Salary`.")
-    
-    # Show sample CSV format
-    sample_data = pd.DataFrame({
-        'Employed': [1, 0, 1],
-        'Bank Balance': [10000, 5000, 15000],
-        'Annual Salary': [50000, 30000, 70000]
-    })
-    
-    with st.expander("💡 View Sample CSV Format"):
-        st.dataframe(sample_data)
     
     uploaded_file = st.file_uploader("Upload CSV", type="csv")
     
@@ -273,36 +214,21 @@ if page == "🏠 Home - Credit Risk Predictor":
                 probs = model.predict_proba(df[["Employed", "Bank Balance", "Annual Salary"]])[:, 1]
                 df["Probability"] = probs
                 df["Prediction"] = [
-                    "✅ Approved" if p > threshold else "❌ Denied" for p in probs
+                    "✅ Loan Approved" if p > threshold else "❌ Loan Denied" for p in probs
                 ]
                 
                 st.success("✅ Bulk predictions complete!")
                 st.dataframe(df)
                 
-                # Summary statistics
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total Applications", len(df))
-                with col2:
-                    st.metric("Approved", len(df[df['Probability'] > threshold]))
-                with col3:
-                    st.metric("Approval Rate", f"{(df['Probability'] > threshold).mean():.1%}")
-                
                 csv = df.to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    "⬇️ Download Predictions as CSV", 
-                    csv, 
-                    "credit_risk_predictions.csv", 
-                    "text/csv"
-                )
+                st.download_button("⬇️ Download Predictions as CSV", csv, "credit_risk_predictions.csv", "text/csv")
             else:
                 st.error(f"❌ Your CSV is missing required columns. Found: {list(df.columns)}")
-                st.info("Required columns: Employed, Bank Balance, Annual Salary")
         except Exception as e:
             st.error(f"⚠️ Error processing file: {e}")
 
 # =============================================================================
-# MODEL VISUALIZATION PAGE
+# MODEL VISUALIZATION PAGE - FIXED VERSION
 # =============================================================================
 elif page == "📊 Model Visualization":
     st.title("📊 Model Visualization & Analysis")
@@ -324,8 +250,10 @@ elif page == "📊 Model Visualization":
             st.info(f"**Classes:** {model.classes_}")
         if hasattr(model, 'n_estimators'):
             st.info(f"**Number of Estimators:** {model.n_estimators}")
+        elif hasattr(model, 'max_depth'):
+            st.info(f"**Max Depth:** {model.max_depth}")
     
-    # Feature Importance
+    # 🎯 Feature Importance
     if hasattr(model, 'feature_importances_'):
         st.header("🎯 Feature Importance")
         features = ['Employed', 'Bank Balance', 'Annual Salary']
@@ -339,18 +267,18 @@ elif page == "📊 Model Visualization":
             color=importances,
             color_continuous_scale='viridis'
         )
-        fig_importance.update_layout(height=400)
+        fig_importance.update_layout(showlegend=False, height=500, margin=dict(l=50, r=50, t=50, b=50))
         st.plotly_chart(fig_importance, use_container_width=True)
     
-    # Generate Synthetic Data for Analysis
+    # 🔄 Enhanced Synthetic Data
     @st.cache_data
     def generate_synthetic_data():
         np.random.seed(42)
         n_samples = 1000
         
         employed = np.random.choice([0, 1], n_samples, p=[0.2, 0.8])
-        bank_balance = np.random.lognormal(mean=9, sigma=1, size=n_samples)
-        annual_salary = np.random.lognormal(mean=10.5, sigma=0.5, size=n_samples)
+        bank_balance = np.random.lognormal(mean=10, sigma=0.9, size=n_samples)
+        annual_salary = np.random.lognormal(mean=11.2, sigma=0.7, size=n_samples)
         
         # Cap extremes
         bank_balance = np.clip(bank_balance, 0, 50000)
@@ -367,34 +295,37 @@ elif page == "📊 Model Visualization":
         
         return data
     
-    with st.spinner("Generating synthetic data for analysis..."):
-        synthetic_data = generate_synthetic_data()
+    synthetic_data = generate_synthetic_data()
 
-    # Probability Distribution
+    # 📈 Probability Distribution
     st.header("📈 Probability Distribution Analysis")
-    
-    fig_dist = px.histogram(
-        synthetic_data,
-        x='Probability',
-        nbins=50,
-        title='Distribution of Approval Probabilities',
-        labels={'Probability': 'Approval Probability', 'count': 'Frequency'}
-    )
-    fig_dist.update_layout(height=400)
-    st.plotly_chart(fig_dist, use_container_width=True)
 
-    # Summary metrics
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Mean Probability", f"{synthetic_data['Probability'].mean():.3f}")
-    with col2:
-        st.metric("Median Probability", f"{synthetic_data['Probability'].median():.3f}")
-    with col3:
-        st.metric("Std Deviation", f"{synthetic_data['Probability'].std():.3f}")
-    with col4:
-        st.metric("Approval Rate (>0.5)", f"{(synthetic_data['Probability'] > 0.5).mean():.1%}")
+    if len(synthetic_data) > 0 and 'Probability' in synthetic_data.columns:
+        fig_dist = px.histogram(
+            synthetic_data,
+            x='Probability',
+            nbins=50,
+            title='Distribution of Approval Probabilities',
+            labels={'Probability': 'Approval Probability', 'count': 'Frequency'},
+            color_discrete_sequence=['#1f77b4']
+        )
+        fig_dist.update_layout(xaxis_range=[0, 1], height=500, showlegend=False, margin=dict(l=50, r=50, t=50, b=50))
+        st.plotly_chart(fig_dist, use_container_width=True)
 
-    # Feature Impact Analysis
+        # Summary metrics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Mean Probability", f"{synthetic_data['Probability'].mean():.3f}")
+        with col2:
+            st.metric("Median Probability", f"{synthetic_data['Probability'].median():.3f}")
+        with col3:
+            st.metric("Std Deviation", f"{synthetic_data['Probability'].std():.3f}")
+        with col4:
+            st.metric("Approval Rate (>0.5)", f"{(synthetic_data['Probability'] > 0.5).mean():.3f}")
+    else:
+        st.warning("No valid probability data generated.")
+
+    # 🔍 Feature Impact
     st.header("🔍 Feature Impact Analysis")
     feature_to_analyze = st.selectbox("Select feature to analyze:", ['Bank Balance', 'Annual Salary', 'Employed'])
 
@@ -409,7 +340,7 @@ elif page == "📊 Model Visualization":
             opacity=0.6,
             color_discrete_map={0: '#ff7f0e', 1: '#2ca02c'}
         )
-        fig_scatter.update_layout(height=500)
+        fig_scatter.update_layout(height=500, showlegend=True, margin=dict(l=50, r=50, t=50, b=50))
         st.plotly_chart(fig_scatter, use_container_width=True)
     else:
         fig_box = px.box(
@@ -420,51 +351,227 @@ elif page == "📊 Model Visualization":
             color='Employed',
             color_discrete_map={0: '#ff7f0e', 1: '#2ca02c'}
         )
-        fig_box.update_layout(height=400)
+        fig_box.update_layout(
+            height=500, showlegend=True,
+            margin=dict(l=50, r=50, t=50, b=50),
+            xaxis_title='Employment Status (0=Unemployed, 1=Employed)'
+        )
         st.plotly_chart(fig_box, use_container_width=True)
 
-    # Interactive Prediction Surface
+    # ⚖️ Threshold Analysis
+    st.header("⚖️ Threshold Analysis")
+
+    @st.cache_data
+    def compute_threshold_metrics(probabilities):
+        thresholds = np.linspace(0.1, 0.9, 50)
+        metrics = []
+
+        # More lenient true label generation
+        true_labels = (probabilities > 0.3).astype(int)
+
+        for thresh in thresholds:
+            predictions = (probabilities > thresh).astype(int)
+
+            tp = np.sum((predictions == 1) & (true_labels == 1))
+            fp = np.sum((predictions == 1) & (true_labels == 0))
+            tn = np.sum((predictions == 0) & (true_labels == 0))
+            fn = np.sum((predictions == 0) & (true_labels == 1))
+
+            accuracy = (tp + tn) / len(probabilities) if len(probabilities) > 0 else 0
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+            specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+
+            metrics.append({
+                'Threshold': thresh,
+                'Accuracy': accuracy,
+                'Precision': precision,
+                'Recall': recall,
+                'Specificity': specificity
+            })
+
+        return pd.DataFrame(metrics)
+
+    metrics_df = compute_threshold_metrics(synthetic_data['Probability'].values)
+
+    if len(metrics_df) > 0:
+        fig_metrics = px.line(
+            metrics_df,
+            x='Threshold',
+            y=['Accuracy', 'Precision', 'Recall', 'Specificity'],
+            title='Model Performance vs Threshold',
+            labels={'value': 'Score', 'variable': 'Metric'}
+        )
+        fig_metrics.update_layout(xaxis_range=[0, 1], yaxis_range=[0, 1], height=500, showlegend=True, margin=dict(l=50, r=50, t=50, b=50))
+        st.plotly_chart(fig_metrics, use_container_width=True)
+
+        # F1-Score-based Optimal Threshold
+        f1 = 2 * metrics_df['Precision'] * metrics_df['Recall'] / (metrics_df['Precision'] + metrics_df['Recall'] + 1e-10)
+        best_idx = np.argmax(f1)
+        optimal_threshold = metrics_df.iloc[best_idx]['Threshold']
+        st.success(f"🎯 **Optimal Threshold (F1-Score):** {optimal_threshold:.3f}")
+        
+        # ROC Curve Analysis
+        st.header("📈 ROC Curve Analysis")
+        
+        # Calculate ROC curve
+        true_labels = (synthetic_data['Probability'] > 0.3).astype(int)
+        probabilities = synthetic_data['Probability'].values
+        
+        # Calculate TPR and FPR for different thresholds
+        thresholds_roc = np.linspace(0, 1, 100)
+        tpr_list = []
+        fpr_list = []
+        
+        for thresh in thresholds_roc:
+            predictions = (probabilities > thresh).astype(int)
+            
+            tp = np.sum((predictions == 1) & (true_labels == 1))
+            fp = np.sum((predictions == 1) & (true_labels == 0))
+            tn = np.sum((predictions == 0) & (true_labels == 0))
+            fn = np.sum((predictions == 0) & (true_labels == 1))
+            
+            tpr = tp / (tp + fn) if (tp + fn) > 0 else 0
+            fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
+            
+            tpr_list.append(tpr)
+            fpr_list.append(fpr)
+        
+        # Calculate AUC
+        auc_score = np.trapz(tpr_list, fpr_list)
+        
+        # Create ROC curve plot
+        fig_roc = go.Figure()
+        
+        # Add ROC curve
+        fig_roc.add_trace(go.Scatter(
+            x=fpr_list,
+            y=tpr_list,
+            mode='lines',
+            name=f'ROC Curve (AUC = {auc_score:.3f})',
+            line=dict(color='blue', width=2)
+        ))
+        
+        # Add diagonal line (random classifier)
+        fig_roc.add_trace(go.Scatter(
+            x=[0, 1],
+            y=[0, 1],
+            mode='lines',
+            name='Random Classifier',
+            line=dict(color='red', dash='dash', width=1)
+        ))
+        
+        fig_roc.update_layout(
+            title='ROC Curve - Model Performance',
+            xaxis_title='False Positive Rate',
+            yaxis_title='True Positive Rate',
+            height=500,
+            showlegend=True,
+            margin=dict(l=50, r=50, t=50, b=50)
+        )
+        
+        st.plotly_chart(fig_roc, use_container_width=True)
+        
+        # Display AUC score
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("AUC Score", f"{auc_score:.3f}")
+        with col2:
+            st.metric("Model Quality", "Excellent" if auc_score > 0.8 else "Good" if auc_score > 0.7 else "Fair")
+        with col3:
+            st.metric("Optimal Threshold", f"{optimal_threshold:.3f}")
+        
+        # Confusion Matrix
+        st.header("🔍 Confusion Matrix")
+        
+        # Create confusion matrix at optimal threshold
+        predictions_optimal = (probabilities > optimal_threshold).astype(int)
+        
+        # Calculate confusion matrix values
+        tp = np.sum((predictions_optimal == 1) & (true_labels == 1))
+        fp = np.sum((predictions_optimal == 1) & (true_labels == 0))
+        tn = np.sum((predictions_optimal == 0) & (true_labels == 0))
+        fn = np.sum((predictions_optimal == 0) & (true_labels == 1))
+        
+        # Create confusion matrix as a heatmap
+        confusion_matrix_data = np.array([[tn, fp], [fn, tp]])
+        
+        fig_cm = px.imshow(
+            confusion_matrix_data,
+            labels=dict(x="Predicted", y="Actual", color="Count"),
+            x=['Denied', 'Approved'],
+            y=['Denied', 'Approved'],
+            color_continuous_scale='Blues',
+            text_auto=True,
+            title=f'Confusion Matrix (Threshold: {optimal_threshold:.3f})'
+        )
+        
+        fig_cm.update_layout(height=400, margin=dict(l=50, r=50, t=50, b=50))
+        st.plotly_chart(fig_cm, use_container_width=True)
+        
+        # Display classification metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+        f1_score = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+        accuracy = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0
+        
+        with col1:
+            st.metric("Precision", f"{precision:.3f}")
+        with col2:
+            st.metric("Recall", f"{recall:.3f}")
+        with col3:
+            st.metric("F1-Score", f"{f1_score:.3f}")
+        with col4:
+            st.metric("Accuracy", f"{accuracy:.3f}")
+    
+    else:
+        st.warning("Threshold analysis could not be completed.")
+
+    # 🌐 Prediction Surface
     st.header("🌐 Interactive Prediction Surface")
 
     if st.checkbox("Show 2D Prediction Surface"):
         employed_val = st.radio("Employment Status:", [0, 1], index=1)
 
-        with st.spinner("Generating prediction surface..."):
-            balance_range = np.linspace(0, 30000, 20)
-            salary_range = np.linspace(20000, 100000, 20)
+        balance_range = np.linspace(0, 30000, 30)
+        salary_range = np.linspace(20000, 120000, 30)
 
-            B, S = np.meshgrid(balance_range, salary_range)
+        B, S = np.meshgrid(balance_range, salary_range)
 
-            grid_data = pd.DataFrame({
-                'Employed': employed_val,
-                'Bank Balance': B.ravel(),
-                'Annual Salary': S.ravel()
-            })
+        grid_data = pd.DataFrame({
+            'Employed': employed_val,
+            'Bank Balance': B.ravel(),
+            'Annual Salary': S.ravel()
+        })
 
-            try:
-                grid_probs = model.predict_proba(grid_data)[:, 1].reshape(B.shape)
+        try:
+            grid_probs = model.predict_proba(grid_data)[:, 1].reshape(B.shape)
 
-                fig_surface = go.Figure(data=[go.Surface(
-                    z=grid_probs,
-                    x=balance_range,
-                    y=salary_range,
-                    colorscale='RdYlGn',
-                    colorbar=dict(title="Approval Probability")
-                )])
+            fig_surface = go.Figure(data=[go.Surface(
+                z=grid_probs,
+                x=balance_range,
+                y=salary_range,
+                colorscale='viridis',
+                name='Approval Probability',
+                colorbar=dict(title="Approval Probability")
+            )])
 
-                fig_surface.update_layout(
-                    title=f'Prediction Surface (Employed: {"Yes" if employed_val else "No"})',
-                    scene=dict(
-                        xaxis_title='Bank Balance ($)',
-                        yaxis_title='Annual Salary ($)',
-                        zaxis_title='Approval Probability'
-                    ),
-                    height=600
-                )
+            fig_surface.update_layout(
+                title=f'Prediction Surface (Employed: {"Yes" if employed_val else "No"})',
+                scene=dict(
+                    xaxis_title='Bank Balance ($)',
+                    yaxis_title='Annual Salary ($)',
+                    zaxis_title='Approval Probability'
+                ),
+                height=600
+            )
 
-                st.plotly_chart(fig_surface, use_container_width=True)
-            except Exception as e:
-                st.error(f"Error generating prediction surface: {e}")
+            st.plotly_chart(fig_surface, use_container_width=True)
+        except Exception as e:
+            st.error(f"Error generating prediction surface: {e}")
+
 
 # =============================================================================
 # ABOUT US PAGE
@@ -488,9 +595,14 @@ elif page == "👩‍💻 About Us":
         """)
     
     with col2:
-        st.info("📷 Developer Profile")
-        st.markdown("**Divyanshi Sharma**")
-        st.markdown("Data Science Enthusiast")
+        # Load profile image with error handling
+        try:
+            st.image("./images/Divyanshi.png", 
+                     width=200, caption="Divyanshi Sharma")
+        except FileNotFoundError:
+            st.info("📷 Profile picture not found")
+        except Exception as e:
+            st.info(f"📷 Could not load profile picture: {str(e)}")
     
     # Skills Section
     st.markdown("---")
@@ -521,7 +633,7 @@ elif page == "👩‍💻 About Us":
         **Tools & Frameworks**
         - 🐼 Pandas, NumPy
         - 🔬 Scikit-learn
-        - 📊 Matplotlib, Plotly
+        - 📊 Matplotlib, Seaborn
         - 🌐 Streamlit
         """)
     
@@ -541,16 +653,37 @@ elif page == "👩‍💻 About Us":
     - **Real-time Predictions**: Get instant loan approval predictions
     - **Interactive Threshold Control**: Adjust sensitivity based on business requirements
     - **Bulk Processing**: Upload CSV files for batch predictions
-    - **Model Visualization**: Understand model behavior and performance
-    - **Comprehensive Analytics**: Deep insights into prediction patterns
+    - **Model Explainability**: SHAP values for transparent decision-making
+    - **Comprehensive Visualizations**: Understand model behavior and performance
     
     ### 🛠️ Technical Implementation
     
     - **Frontend**: Streamlit for interactive web interface
     - **Backend**: Python with scikit-learn for machine learning
-    - **Visualization**: Plotly for interactive charts and graphs
+    - **Visualization**: Plotly and Matplotlib for charts and graphs
+    - **Explainability**: SHAP for model interpretability
     - **Data Processing**: Pandas and NumPy for data manipulation
-    - **Model Deployment**: Streamlit Cloud for easy access
+    """)
+    
+    # Educational Journey
+    st.markdown("---")
+    st.header("📚 Educational Journey")
+    
+    st.markdown("""
+    ### 🎓 Academic Background
+    
+    Currently pursuing **B.Tech in Computer Science** with a specialization in **Data Science**. 
+    My academic journey has equipped me with:
+    
+    - Strong foundation in computer science fundamentals
+    - Advanced knowledge in data science and machine learning
+    - Hands-on experience with real-world projects
+    - Understanding of statistical methods and algorithms
+    
+    ### 🌱 Learning Philosophy
+    
+    I believe in learning by doing. This project represents my commitment to applying theoretical 
+    knowledge to solve practical problems in the financial sector.
     """)
     
     # Contact Section
@@ -576,11 +709,21 @@ elif page == "👩‍💻 About Us":
         st.markdown("""
         **Find me on:**
         
-        - 📧 Email: divyanshi12023@gmail.com
-        - 💼 LinkedIn: [Profile Link](https://www.linkedin.com/in/divyanshi-sharma-a71a4825a/)
-        - 🐱 GitHub: [github.com/Divyanshi88](https://github.com/Divyanshi88)
-        - 🌐 Portfolio: [Portfolio Link](https://divyanshi88.github.io/)
+        - 📧 Email: [divyanshi12023@gmail.com]
+        - 💼 LinkedIn: [https://www.linkedin.com/in/divyanshi-sharma-a71a4825a/]
+        - 🐱 GitHub: [github.com/Divyanshi88]
+        - 🌐 Portfolio: [https://divyanshi88.github.io/]
         """)
+    
+    # Footer
+    st.markdown("---")
+    st.markdown("""
+    <div style='text-align: center; color: #666; padding: 20px;'>
+        <p>💡 <strong>Innovation through Data Science</strong> 💡</p>
+        <p>Built with ❤️ by Divyanshi Sharma | B.Tech Computer Science (Data Science)</p>
+        <p>© 2024 Credit Risk Prediction System</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 # Sidebar footer
 st.sidebar.markdown("---")
