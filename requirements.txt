@@ -1,9 +1,9 @@
-# Core
+# Core Streamlit and Data Handling
 streamlit==1.35.0
 pandas==1.5.3
 numpy==1.23.5
 
-# ML
+# Machine Learning
 scikit-learn==1.2.2
 joblib==1.2.0
 
@@ -13,9 +13,10 @@ seaborn==0.11.2
 plotly==5.15.0
 kaleido==0.2.1
 
-# Explainability
+# Model Explainability
 shap==0.41.0
+slicer==0.0.7
 
-# Excel & Images
+# Optional Features
 openpyxl==3.0.10
 pillow==9.4.0
