@@ -1,2 +1,16 @@
 [global]
 pythonVersion = "3.9"
+
+[theme]
+base = "light"
+
+[server]
+headless = true
+port = 8501
+enableCORS = false
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"

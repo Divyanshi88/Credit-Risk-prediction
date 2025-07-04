@@ -9,12 +9,28 @@ import joblib
 import pandas as pd
 import shap
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
 import seaborn as sns
 import numpy as np
 from sklearn.metrics import classification_report, confusion_matrix
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import plotly.io as pio
+
+# Configure plotly for better rendering
+pio.templates.default = "plotly_white"
+pio.renderers.default = "browser"
+
+# Set matplotlib and seaborn style
+plt.style.use('default')
+sns.set_style("whitegrid")
+
+# Configure pandas options
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', None)
+pd.set_option('display.max_colwidth', None)
 
 # --- Load Model ---
 @st.cache_resource
@@ -124,9 +140,17 @@ if page == "🏠 Home - Credit Risk Predictor":
                 explainer = shap.Explainer(model)
                 shap_values = explainer(sample_input)
                 
+                # Clear any existing plots
+                plt.clf()
+                plt.figure(figsize=(10, 6))
+                
                 st.set_option('deprecation.showPyplotGlobalUse', False)
                 shap.plots.waterfall(shap_values[0], show=False)
-                st.pyplot(bbox_inches="tight")
+                
+                # Ensure the plot is displayed
+                fig = plt.gcf()
+                st.pyplot(fig, bbox_inches="tight", clear_figure=True)
+                plt.close(fig)
             except Exception as e:
                 st.warning("SHAP explanation not available. Error: " + str(e))
                 
@@ -176,7 +200,7 @@ if page == "🏠 Home - Credit Risk Predictor":
             st.error(f"⚠️ Error processing file: {e}")
 
 # =============================================================================
-# MODEL VISUALIZATION PAGE
+# MODEL VISUALIZATION PAGE - FIXED VERSION
 # =============================================================================
 elif page == "📊 Model Visualization":
     st.title("📊 Model Visualization & Analysis")
@@ -215,45 +239,80 @@ elif page == "📊 Model Visualization":
             color=importances,
             color_continuous_scale='viridis'
         )
+        fig_importance.update_layout(
+            showlegend=False,
+            height=500,
+            margin=dict(l=50, r=50, t=50, b=50)
+        )
         st.plotly_chart(fig_importance, use_container_width=True)
+    
+    # Generate synthetic data for analysis
+    @st.cache_data
+    def generate_synthetic_data():
+        np.random.seed(42)
+        n_samples = 1000
+        
+        # Create more realistic synthetic data
+        employed = np.random.choice([0, 1], n_samples, p=[0.2, 0.8])
+        bank_balance = np.random.lognormal(mean=8.5, sigma=0.8, size=n_samples)
+        annual_salary = np.random.lognormal(mean=10.8, sigma=0.6, size=n_samples)
+        
+        # Cap extreme values
+        bank_balance = np.clip(bank_balance, 0, 50000)
+        annual_salary = np.clip(annual_salary, 20000, 150000)
+        
+        data = pd.DataFrame({
+            'Employed': employed,
+            'Bank Balance': bank_balance,
+            'Annual Salary': annual_salary
+        })
+        
+        # Get probabilities
+        probs = model.predict_proba(data)[:, 1]
+        data['Probability'] = probs
+        
+        return data
+    
+    synthetic_data = generate_synthetic_data()
     
     # Probability Distribution Analysis
     st.header("📈 Probability Distribution Analysis")
     
-    # Generate synthetic data
-    np.random.seed(42)
-    n_samples = 1000
-    synthetic_data = pd.DataFrame({
-        'Employed': np.random.choice([0, 1], n_samples, p=[0.2, 0.8]),
-        'Bank Balance': np.random.normal(8000, 5000, n_samples).clip(0, None),
-        'Annual Salary': np.random.normal(50000, 20000, n_samples).clip(0, None)
-    })
-
-    synthetic_data.columns = synthetic_data.columns.str.strip()
-    synthetic_probs = model.predict_proba(synthetic_data)[:, 1]
-    synthetic_data['Probability'] = synthetic_probs
-    
-    st.subheader("🔍 Debug: Synthetic Data Sample")
-    st.write(synthetic_data.head())
-    st.write("Synthetic Data Shape:", synthetic_data.shape)
-
-    if not synthetic_data.empty and 'Probability' in synthetic_data.columns:
+    # Check if data is valid
+    if len(synthetic_data) > 0 and 'Probability' in synthetic_data.columns:
         fig_dist = px.histogram(
             synthetic_data,
             x='Probability',
             nbins=50,
             title='Distribution of Approval Probabilities',
-            labels={'Probability': 'Approval Probability', 'count': 'Frequency'}
+            labels={'Probability': 'Approval Probability', 'count': 'Frequency'},
+            color_discrete_sequence=['#1f77b4']
         )
-        fig_dist.update_layout(xaxis_range=[0, 1])
+        fig_dist.update_layout(
+            xaxis_range=[0, 1],
+            height=500,
+            showlegend=False,
+            margin=dict(l=50, r=50, t=50, b=50)
+        )
         st.plotly_chart(fig_dist, use_container_width=True)
+        
+        # Summary statistics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Mean Probability", f"{synthetic_data['Probability'].mean():.3f}")
+        with col2:
+            st.metric("Median Probability", f"{synthetic_data['Probability'].median():.3f}")
+        with col3:
+            st.metric("Std Deviation", f"{synthetic_data['Probability'].std():.3f}")
+        with col4:
+            st.metric("Approval Rate (>0.5)", f"{(synthetic_data['Probability'] > 0.5).mean():.3f}")
     else:
-        st.warning("No probability data available to plot.")
-
-    # Feature Impact
+        st.error("Unable to generate synthetic data for visualization.")
+    
+    # Feature Impact Analysis
     st.header("🔍 Feature Impact Analysis")
     feature_to_analyze = st.selectbox("Select feature to analyze:", ['Bank Balance', 'Annual Salary', 'Employed'])
-
+    
     if feature_to_analyze in ['Bank Balance', 'Annual Salary']:
         fig_scatter = px.scatter(
             synthetic_data,
@@ -262,7 +321,13 @@ elif page == "📊 Model Visualization":
             color='Employed',
             title=f'{feature_to_analyze} vs Approval Probability',
             labels={'Probability': 'Approval Probability'},
-            opacity=0.6
+            opacity=0.6,
+            color_discrete_map={0: '#ff7f0e', 1: '#2ca02c'}
+        )
+        fig_scatter.update_layout(
+            height=500,
+            showlegend=True,
+            margin=dict(l=50, r=50, t=50, b=50)
         )
         st.plotly_chart(fig_scatter, use_container_width=True)
     else:
@@ -270,222 +335,90 @@ elif page == "📊 Model Visualization":
             synthetic_data,
             x='Employed',
             y='Probability',
-            title='Employment Status vs Approval Probability'
+            title='Employment Status vs Approval Probability',
+            color='Employed',
+            color_discrete_map={0: '#ff7f0e', 1: '#2ca02c'}
+        )
+        fig_box.update_layout(
+            height=500,
+            showlegend=True,
+            margin=dict(l=50, r=50, t=50, b=50),
+            xaxis_title='Employment Status (0=Unemployed, 1=Employed)'
         )
         st.plotly_chart(fig_box, use_container_width=True)
-
+    
     # Threshold Analysis
     st.header("⚖️ Threshold Analysis")
     
-    thresholds = np.linspace(0.1, 0.9, 50)
-    metrics = []
+    @st.cache_data
+    def compute_threshold_metrics(probabilities):
+        thresholds = np.linspace(0.1, 0.9, 50)
+        metrics = []
+        
+        # Generate synthetic true labels based on probabilities (for demo purposes)
+        true_labels = (probabilities > 0.5).astype(int)
+        
+        for thresh in thresholds:
+            predictions = (probabilities > thresh).astype(int)
+            
+            # Calculate metrics
+            tp = np.sum((predictions == 1) & (true_labels == 1))
+            fp = np.sum((predictions == 1) & (true_labels == 0))
+            tn = np.sum((predictions == 0) & (true_labels == 0))
+            fn = np.sum((predictions == 0) & (true_labels == 1))
+            
+            accuracy = (tp + tn) / len(probabilities) if len(probabilities) > 0 else 0
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+            specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+            
+            metrics.append({
+                'Threshold': thresh,
+                'Accuracy': accuracy,
+                'Precision': precision,
+                'Recall': recall,
+                'Specificity': specificity
+            })
+        
+        return pd.DataFrame(metrics)
     
-    for thresh in thresholds:
-        predictions = (synthetic_probs > thresh).astype(int)
-        true_labels = (synthetic_probs > 0.5).astype(int)  # Synthetic labels
-
-        accuracy = np.mean(predictions == true_labels)
-        precision = np.sum((predictions == 1) & (true_labels == 1)) / max(np.sum(predictions == 1), 1)
-        recall = np.sum((predictions == 1) & (true_labels == 1)) / max(np.sum(true_labels == 1), 1)
-
-        metrics.append({
-            'Threshold': thresh,
-            'Accuracy': accuracy,
-            'Precision': precision,
-            'Recall': recall
-        })
-
-    metrics_df = pd.DataFrame(metrics)
-    metrics_df.columns = metrics_df.columns.str.strip()
-
-    st.subheader("🔍 Debug: Threshold Metrics Sample")
-    st.write(metrics_df.head())
-    st.write("Metrics Data Shape:", metrics_df.shape)
-
-    if not metrics_df.empty and {'Threshold', 'Accuracy', 'Precision', 'Recall'}.issubset(metrics_df.columns):
+    metrics_df = compute_threshold_metrics(synthetic_data['Probability'].values)
+    
+    if len(metrics_df) > 0:
         fig_metrics = px.line(
             metrics_df,
             x='Threshold',
-            y=['Accuracy', 'Precision', 'Recall'],
+            y=['Accuracy', 'Precision', 'Recall', 'Specificity'],
             title='Model Performance vs Threshold',
             labels={'value': 'Score', 'variable': 'Metric'}
         )
-        fig_metrics.update_layout(xaxis_range=[0, 1], yaxis_range=[0, 1])
+        fig_metrics.update_layout(
+            xaxis_range=[0, 1], 
+            yaxis_range=[0, 1],
+            height=500,
+            showlegend=True,
+            margin=dict(l=50, r=50, t=50, b=50)
+        )
         st.plotly_chart(fig_metrics, use_container_width=True)
+        
+        # Show optimal threshold
+        best_f1_idx = np.argmax(2 * metrics_df['Precision'] * metrics_df['Recall'] / 
+                               (metrics_df['Precision'] + metrics_df['Recall'] + 1e-10))
+        optimal_threshold = metrics_df.iloc[best_f1_idx]['Threshold']
+        
+        st.success(f"🎯 **Optimal Threshold (F1-Score):** {optimal_threshold:.3f}")
     else:
-        st.warning("No valid metrics data to plot.")
-
-    # Optional: Interactive Prediction Surface
-    st.header("🌐 Interactive Prediction Surface")
-    
-    if st.checkbox("Show 2D Prediction Surface"):
-        employed_val = st.radio("Employment Status:", [0, 1], index=1)
-        balance_range = np.linspace(0, 20000, 50)
-        salary_range = np.linspace(0, 100000, 50)
-        B, S = np.meshgrid(balance_range, salary_range)
-
-        grid_data = pd.DataFrame({
-            'Employed': employed_val,
-            'Bank Balance': B.ravel(),
-            'Annual Salary': S.ravel()
-        })
-
-        grid_probs = model.predict_proba(grid_data)[:, 1].reshape(B.shape)
-
-        fig_surface = go.Figure(data=[go.Surface(
-            z=grid_probs,
-            x=balance_range,
-            y=salary_range,
-            colorscale='viridis',
-            name='Approval Probability'
-        )])
-
-        fig_surface.update_layout(
-            title=f'Prediction Surface (Employed: {employed_val})',
-            scene=dict(
-                xaxis_title='Bank Balance ($)',
-                yaxis_title='Annual Salary ($)',
-                zaxis_title='Approval Probability'
-            )
-        )
-
-        st.plotly_chart(fig_surface, use_container_width=True)
-
-    st.title("📊 Model Visualization & Analysis")
-    st.markdown("Explore the credit risk model's behavior and performance metrics.")
-    
-    # Model Information
-    st.header("🤖 Model Information")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.info(f"**Model Type:** {type(model).__name__}")
-        if hasattr(model, 'feature_names_in_'):
-            st.info(f"**Features:** {', '.join(model.feature_names_in_)}")
-        if hasattr(model, 'n_features_in_'):
-            st.info(f"**Number of Features:** {model.n_features_in_}")
-    
-    with col2:
-        if hasattr(model, 'classes_'):
-            st.info(f"**Classes:** {model.classes_}")
-        if hasattr(model, 'n_estimators'):
-            st.info(f"**Number of Estimators:** {model.n_estimators}")
-        elif hasattr(model, 'max_depth'):
-            st.info(f"**Max Depth:** {model.max_depth}")
-    
-    # Feature Importance (if available)
-    if hasattr(model, 'feature_importances_'):
-        st.header("🎯 Feature Importance")
-        
-        features = ['Employed', 'Bank Balance', 'Annual Salary']
-        importances = model.feature_importances_
-        
-        fig_importance = px.bar(
-            x=features,
-            y=importances,
-            title="Feature Importance",
-            labels={'x': 'Features', 'y': 'Importance'},
-            color=importances,
-            color_continuous_scale='viridis'
-        )
-        st.plotly_chart(fig_importance, use_container_width=True)
-    
-    # Probability Distribution Analysis
-    st.header("📈 Probability Distribution Analysis")
-    
-    # Generate synthetic data for visualization
-    np.random.seed(42)
-    n_samples = 1000
-    
-    synthetic_data = pd.DataFrame({
-        'Employed': np.random.choice([0, 1], n_samples, p=[0.2, 0.8]),
-        'Bank Balance': np.random.normal(8000, 5000, n_samples).clip(0, None),
-        'Annual Salary': np.random.normal(50000, 20000, n_samples).clip(0, None)
-    })
-    
-    synthetic_probs = model.predict_proba(synthetic_data)[:, 1]
-    synthetic_data['Probability'] = synthetic_probs
-    
-    # Probability distribution histogram
-    fig_dist = px.histogram(
-        synthetic_data,
-        x='Probability',
-        nbins=50,
-        title='Distribution of Approval Probabilities',
-        labels={'Probability': 'Approval Probability', 'count': 'Frequency'}
-    )
-    st.plotly_chart(fig_dist, use_container_width=True)
-    
-    # Feature vs Probability Analysis
-    st.header("🔍 Feature Impact Analysis")
-    
-    feature_to_analyze = st.selectbox(
-        "Select feature to analyze:",
-        ['Bank Balance', 'Annual Salary', 'Employed']
-    )
-    
-    if feature_to_analyze in ['Bank Balance', 'Annual Salary']:
-        fig_scatter = px.scatter(
-            synthetic_data,
-            x=feature_to_analyze,
-            y='Probability',
-            color='Employed',
-            title=f'{feature_to_analyze} vs Approval Probability',
-            labels={'Probability': 'Approval Probability'},
-            opacity=0.6
-        )
-        st.plotly_chart(fig_scatter, use_container_width=True)
-    else:
-        fig_box = px.box(
-            synthetic_data,
-            x='Employed',
-            y='Probability',
-            title='Employment Status vs Approval Probability'
-        )
-        st.plotly_chart(fig_box, use_container_width=True)
-    
-    # Threshold Analysis
-    st.header("⚖️ Threshold Analysis")
-    
-    thresholds = np.linspace(0.1, 0.9, 50)
-    metrics = []
-    
-    for thresh in thresholds:
-        predictions = (synthetic_probs > thresh).astype(int)
-        # Assuming roughly balanced classes for demonstration
-        true_labels = (synthetic_probs > 0.5).astype(int)  # Simplified ground truth
-        
-        accuracy = np.mean(predictions == true_labels)
-        precision = np.sum((predictions == 1) & (true_labels == 1)) / max(np.sum(predictions == 1), 1)
-        recall = np.sum((predictions == 1) & (true_labels == 1)) / max(np.sum(true_labels == 1), 1)
-        
-        metrics.append({
-            'Threshold': thresh,
-            'Accuracy': accuracy,
-            'Precision': precision,
-            'Recall': recall
-        })
-    
-    metrics_df = pd.DataFrame(metrics)
-    
-    fig_metrics = px.line(
-        metrics_df,
-        x='Threshold',
-        y=['Accuracy', 'Precision', 'Recall'],
-        title='Model Performance vs Threshold',
-        labels={'value': 'Score', 'variable': 'Metric'}
-    )
-    st.plotly_chart(fig_metrics, use_container_width=True)
+        st.error("Unable to compute threshold metrics.")
     
     # Interactive Prediction Surface
     st.header("🌐 Interactive Prediction Surface")
     
-    # Create a grid for 2D visualization
     if st.checkbox("Show 2D Prediction Surface"):
         employed_val = st.radio("Employment Status:", [0, 1], index=1)
         
-        balance_range = np.linspace(0, 20000, 50)
-        salary_range = np.linspace(0, 100000, 50)
+        # Create a more focused grid
+        balance_range = np.linspace(0, 30000, 30)
+        salary_range = np.linspace(20000, 120000, 30)
         
         B, S = np.meshgrid(balance_range, salary_range)
         
@@ -495,26 +428,31 @@ elif page == "📊 Model Visualization":
             'Annual Salary': S.ravel()
         })
         
-        grid_probs = model.predict_proba(grid_data)[:, 1].reshape(B.shape)
-        
-        fig_surface = go.Figure(data=[go.Surface(
-            z=grid_probs,
-            x=balance_range,
-            y=salary_range,
-            colorscale='viridis',
-            name='Approval Probability'
-        )])
-        
-        fig_surface.update_layout(
-            title=f'Prediction Surface (Employed: {employed_val})',
-            scene=dict(
-                xaxis_title='Bank Balance ($)',
-                yaxis_title='Annual Salary ($)',
-                zaxis_title='Approval Probability'
+        try:
+            grid_probs = model.predict_proba(grid_data)[:, 1].reshape(B.shape)
+            
+            fig_surface = go.Figure(data=[go.Surface(
+                z=grid_probs,
+                x=balance_range,
+                y=salary_range,
+                colorscale='viridis',
+                name='Approval Probability',
+                colorbar=dict(title="Approval Probability")
+            )])
+            
+            fig_surface.update_layout(
+                title=f'Prediction Surface (Employed: {"Yes" if employed_val else "No"})',
+                scene=dict(
+                    xaxis_title='Bank Balance ($)',
+                    yaxis_title='Annual Salary ($)',
+                    zaxis_title='Approval Probability'
+                ),
+                height=600
             )
-        )
-        
-        st.plotly_chart(fig_surface, use_container_width=True)
+            
+            st.plotly_chart(fig_surface, use_container_width=True)
+        except Exception as e:
+            st.error(f"Error generating prediction surface: {e}")
 
 # =============================================================================
 # ABOUT US PAGE
